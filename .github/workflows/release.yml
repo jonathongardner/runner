@@ -1,0 +1,33 @@
+permissions:
+  contents: write
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - version.txt
+name: release-please
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.22
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run test
+        run: go test
+      - name: Build release file
+        run: git log $(git show HEAD~1:version.txt)..HEAD --pretty=format:"- %s (%h)" | grep -E '^- (chore|fix|feat|docs):' > release.md || (echo "no changes" && exit 1)
+      # - name: Update Change Log
+      #   run: echo -e "# $(cat setup/version.txt)\n$(cat release.md)\n$(cat CHANGELOG.md)" > CHANGELOG.md
+      - name: Create release
+        run: gh release create $(cat version.txt) -F release.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+        
