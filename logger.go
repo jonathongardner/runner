@@ -1,5 +1,7 @@
 package runner
 
+import "fmt"
+
 type logger interface {
 	Debug(...interface{})
 	Debugf(string, ...interface{})
@@ -33,3 +35,16 @@ var log logger = emptyLogger{}
 func SetLogger(l logger) {
 	log = l
 }
+
+type fmtLogger struct{}
+
+func (e fmtLogger) Debug(x ...interface{})            { fmt.Println(x...) }
+func (e fmtLogger) Debugf(y string, x ...interface{}) { fmt.Printf(y+"\n", x...) }
+func (e fmtLogger) Info(x ...interface{})             { fmt.Println(x...) }
+func (e fmtLogger) Infof(y string, x ...interface{})  { fmt.Printf(y+"\n", x...) }
+func (e fmtLogger) Warn(x ...interface{})             { fmt.Println(x...) }
+func (e fmtLogger) Warnf(y string, x ...interface{})  { fmt.Printf(y+"\n", x...) }
+func (e fmtLogger) Error(x ...interface{})            { fmt.Println(x...) }
+func (e fmtLogger) Errorf(y string, x ...interface{}) { fmt.Printf(y+"\n", x...) }
+func (e fmtLogger) Fatal(x ...interface{})            { fmt.Println(x...) }
+func (e fmtLogger) Fatalf(y string, x ...interface{}) { fmt.Printf(y+"\n", x...) }
