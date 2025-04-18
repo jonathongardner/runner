@@ -216,7 +216,6 @@ func (c *Controller) LimitedGo(runner Runner) {
 		// Add count so we know to wait to close stuff
 		c.limitCountChan <- true
 		go func() {
-			log.Info("Waiting")
 			select {
 			case <-c.doneChan:
 				log.Debug("Not running limited job because shuting down")
@@ -231,6 +230,30 @@ func (c *Controller) LimitedGo(runner Runner) {
 				c.limitCountChan <- false
 			}
 		}()
+	})
+}
+
+// BlLimitedGo is the same as LimitedGo but it will block adding
+// to the limiter until one is free
+func (c *Controller) BlLimitedGo(runner Runner) {
+	c.checkDone(func() {
+		// Add count so we know to wait to close stuff
+		c.limitCountChan <- true
+		select {
+		case <-c.doneChan:
+			log.Debug("Not running limited job because shuting down")
+		case c.limiter <- true:
+			go func() {
+				log.Info("Got it")
+				c.addError(runner.Run(c))
+				select {
+				case <-c.limiter:
+				default:
+					log.Errorf("no more limiter available")
+				}
+				c.limitCountChan <- false
+			}()
+		}
 	})
 }
 
