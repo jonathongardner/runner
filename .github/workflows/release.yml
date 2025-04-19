@@ -5,8 +5,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - version.txt
 name: release-please
 jobs:
   release-please:
@@ -22,12 +20,19 @@ jobs:
           fetch-depth: 0
       - name: Run test
         run: go test ./... -timeout 30s
-      - name: Build release file
-        run: git log $(git show HEAD~1:version.txt)..HEAD --pretty=format:"- %s (%h)" | grep -E '^- (chore|fix|feat|docs):' > release.md || (echo "no changes" && exit 1)
-      # - name: Update Change Log
-      #   run: echo -e "# $(cat setup/version.txt)\n$(cat release.md)\n$(cat CHANGELOG.md)" > CHANGELOG.md
-      - name: Create release
-        run: gh release create $(cat version.txt) -F release.md
+      - name: Check version
+        id: version
+        run: |
+          echo "::set-output name=prev::$(git show HEAD~1:version.txt)" 
+          echo "::set-output name=cur::$(git show HEAD:version.txt)" 
+      - name: Build release file and create release
+        if: ${{ steps.version.outputs.prev != steps.version.outputs.cur }}
+        run: |
+          # echo -e "# $(cat setup/version.txt)\n$(cat release.md)\n$(cat CHANGELOG.md)" > CHANGELOG.md
+          git log $PREV_VERSION..HEAD --pretty=format:"- %s (%h)" | grep -E '^- (chore|fix|feat|docs):' > release.md || (echo "no changes" && exit 1)
+          gh release create $CUR_VERSION -F release.md
         env:
           GH_TOKEN: ${{ github.token }}
+          PREV_VERSION: ${{ steps.version.outputs.prev }}
+          CUR_VERSION: ${{ steps.version.outputs.cur }}
         

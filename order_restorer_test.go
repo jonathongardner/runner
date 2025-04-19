@@ -52,6 +52,41 @@ func TestOrderRestorer(t *testing.T) {
 	}
 }
 
+//--------------Reciever Sender Runners-----------------
+
+func TestWhenLaterFinishedCalledOrderRestroererStillWorks(t *testing.T) {
+	done := make(chan struct{})
+	t1 := NewOrderRestorer(done)
+	t2 := t1.Next()
+	tm := t2.Next()
+	t3 := tm.Next()
+
+	vals := []int{}
+
+	go func() {
+		// just confirm that one doesnt return an error, assume others dont...
+		t2.Wait()
+		vals = append(vals, 2)
+		t2.Finished()
+	}()
+
+	go func() {
+		t1.Wait()
+		vals = append(vals, 1)
+		t1.Finished()
+	}()
+
+	tm.Finished()
+
+	t3.Wait()
+	vals = append(vals, 3)
+	t3.Finished()
+
+	if !slices.Equal(vals, []int{1, 2, 3}) {
+		t.Errorf("Expected [1 2 3] but got %v", vals)
+	}
+}
+
 func TestAlreadyFinishedOrderRestorer(t *testing.T) {
 	done := make(chan struct{})
 	close(done)
