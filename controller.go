@@ -38,6 +38,8 @@ type Controller struct {
 	//-----Pass errors-----
 	errorChan chan error
 	errors    []string
+	//-----Order Restorer------
+	or *OrderRestorer
 }
 
 // NewController returns a new controller with default values
@@ -50,15 +52,17 @@ func NewControllerWithLimit(limit int) *Controller {
 	if limit < 1 {
 		panic("limit must be greater than 0")
 	}
+	dc := make(chan struct{})
 	c := &Controller{
 		mainCountChan:  make(chan bool),
 		backCountChan:  make(chan bool),
 		limitCountChan: make(chan bool),
 		limiter:        make(chan bool, limit),
-		doneChan:       make(chan struct{}),
+		doneChan:       dc,
 		finishChan:     make(chan struct{}),
 		errorChan:      make(chan error),
 		errors:         make([]string, 0),
+		or:             NewOrderRestorer(dc),
 	}
 
 	go c.listenForCtrlC()
@@ -77,15 +81,15 @@ func (c *Controller) listenForCtrlC() {
 
 	<-ch
 	log.Info("Gracefully shutting down...")
-	c.Done()
+	c.Shutdown()
 
 	<-ch
 	log.Info("Killing!")
 	c.Finish()
 }
 
-// Done used to gracefully close everything
-func (c *Controller) Done() {
+// Shutdown used to gracefully close everything
+func (c *Controller) Shutdown() {
 	log.Debug("Done")
 	select {
 	case <-c.doneChan:
@@ -94,11 +98,23 @@ func (c *Controller) Done() {
 		close(c.doneChan)
 	}
 }
-func (c *Controller) IsDone() chan struct{} {
+
+// IsShuttingDown will return true if the controller is shutting down
+func (c *Controller) IsShuttingDown() bool {
+	select {
+	case <-c.doneChan:
+		return true
+	default:
+		return false
+	}
+}
+
+// ShuttingDownChan will return a channel that will be closed when the controller is shutting down
+func (c *Controller) ShuttingDownChan() <-chan struct{} {
 	return c.doneChan
 }
 
-// Finish used to exit
+// Finish used to exit (should call Shutdown to gracefully close everything)
 func (c *Controller) Finish() {
 	log.Debug("Finish")
 	select {
@@ -109,8 +125,8 @@ func (c *Controller) Finish() {
 	}
 }
 
-// IsFinish will wait until all jobs are finished
-func (c *Controller) IsFinish() error {
+// Wait will wait until all jobs are finished
+func (c *Controller) Wait() error {
 	c.mainCountChan <- false  // so that we dont close until something is waiting
 	c.limitCountChan <- false // so that we dont close until something is waiting
 	<-c.finishChan
@@ -127,6 +143,13 @@ func (c *Controller) Errors() string {
 	}
 
 	return strings.Join(c.errors, ", ")
+}
+
+// NextOR returns an OrderRestorer and queues up the next order restorer
+func (c *Controller) NextOR() *OrderRestorer {
+	toReturn := c.or
+	c.or = c.or.Next()
+	return toReturn
 }
 
 //----------------Handle close-----------------
@@ -159,7 +182,7 @@ func (c *Controller) runMain() {
 		}
 
 		if mainCount == 0 && limitCount == 0 {
-			c.Done()
+			c.Shutdown()
 		}
 
 		log.Debugf("Main %v, Limmited %v, Background %v", mainCount, limitCount, backgroundCount)
@@ -184,106 +207,4 @@ func (c *Controller) runErr() {
 		c.errors = append(c.errors, newError.Error())
 	}
 	c.Finish()
-}
-
-// Go run all of these until none left
-// if the runner returns error it will add to chan a
-// and can be retrieved with `Errors()`
-func (c *Controller) Go(runner Runner) {
-	c.checkDone(func() {
-		c.mainCountChan <- true
-		go func() {
-			c.addError(runner.Run(c))
-			c.mainCountChan <- false
-		}()
-	})
-}
-
-func (c *Controller) checkDone(function func()) {
-	select {
-	case <-c.doneChan:
-		log.Debug("Not running job because shuting down")
-	default:
-		function()
-	}
-}
-
-// LimitedGo run all of these with a limit until none left
-// if the runner returns error it will add to chan a
-// and can be retrieved with `Errors()`
-func (c *Controller) LimitedGo(runner Runner) {
-	c.checkDone(func() {
-		// Add count so we know to wait to close stuff
-		c.limitCountChan <- true
-		go func() {
-			select {
-			case <-c.doneChan:
-				log.Debug("Not running limited job because shuting down")
-			case c.limiter <- true:
-				log.Info("Got it")
-				c.addError(runner.Run(c))
-				select {
-				case <-c.limiter:
-				default:
-					log.Errorf("no more limiter available")
-				}
-				c.limitCountChan <- false
-			}
-		}()
-	})
-}
-
-// BlLimitedGo is the same as LimitedGo but it will block adding
-// to the limiter until one is free
-func (c *Controller) BlLimitedGo(runner Runner) {
-	c.checkDone(func() {
-		// Add count so we know to wait to close stuff
-		c.limitCountChan <- true
-		select {
-		case <-c.doneChan:
-			log.Debug("Not running limited job because shuting down")
-		case c.limiter <- true:
-			go func() {
-				log.Info("Got it")
-				c.addError(runner.Run(c))
-				select {
-				case <-c.limiter:
-				default:
-					log.Errorf("no more limiter available")
-				}
-				c.limitCountChan <- false
-			}()
-		}
-	})
-}
-
-func (c *Controller) addError(err error) {
-	if err == nil {
-		return
-	}
-	select {
-	case <-c.doneChan:
-		return
-	default:
-		c.errorChan <- err
-	}
-}
-
-// Running in background will get stopped when all `Go` created ones finish
-// if the bgRunner returns error it will gracefully shutdown everything else
-func (c *Controller) GoBackground(bgRunner Runner) {
-	select {
-	case <-c.doneChan:
-		log.Debug("Not running background job because shuting down")
-	default:
-		c.backCountChan <- true
-		go func() {
-			err := bgRunner.Run(c)
-			if err != nil {
-				c.errorChan <- err
-				c.Done()
-			}
-			c.backCountChan <- false
-		}()
-	}
 }

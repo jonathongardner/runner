@@ -23,7 +23,7 @@ func (f foreverRunnner) Run(rc *Controller) error {
 	foo := make(chan bool)
 	select {
 	case <-foo:
-	case <-rc.IsDone():
+	case <-rc.ShuttingDownChan():
 		return nil
 	}
 	return nil
@@ -73,7 +73,7 @@ func (rr *recieverRunnner) Run(rc *Controller) error {
 			if rr.num == 0 {
 				return nil
 			}
-		case <-rc.IsDone():
+		case <-rc.ShuttingDownChan():
 			return fmt.Errorf("closed receiver early")
 		}
 	}
@@ -124,8 +124,7 @@ func TestController(t *testing.T) {
 		}
 		c.GoBackground(foreverRunnner{})
 
-		err := c.IsFinish()
-		if err != nil {
+		if err := c.Wait(); err != nil {
 			t.Errorf("expected no error, got %v", err)
 		}
 
@@ -140,8 +139,8 @@ func TestController(t *testing.T) {
 		}
 		c.Go(errorRunnner{})
 		c.Go(errorRunnner{})
-		err := c.IsFinish()
-		if err != ErrErrors {
+
+		if err := c.Wait(); err != ErrErrors {
 			t.Errorf("expected no errors, got %v", err)
 		}
 
@@ -161,8 +160,7 @@ func TestController(t *testing.T) {
 		}
 		c.GoBackground(errorRunnner{})
 		c.Go(finishRunnner{})
-		err := c.IsFinish()
-		if err != ErrErrors {
+		if err := c.Wait(); err != ErrErrors {
 			t.Errorf("expected ErrErrors, got %v", err)
 		}
 
@@ -197,8 +195,7 @@ func TestController(t *testing.T) {
 		}
 		// just add one to check
 		rec.add(4)
-		err := c.IsFinish()
-		if err != nil {
+		if err := c.Wait(); err != nil {
 			t.Errorf("expected no errors, got %v", err)
 		}
 		if !rec.match([]int{1, 2, 3, 4}) {
@@ -226,8 +223,7 @@ func TestController(t *testing.T) {
 			c.Go(s)
 		}
 		rec.add(4)
-		err := c.IsFinish()
-		if err != nil {
+		if err := c.Wait(); err != nil {
 			t.Errorf("expected no errors, got %v", err)
 		}
 		if !rec.match([]int{1, 2, 3, 4}) {
@@ -256,8 +252,7 @@ func TestController(t *testing.T) {
 		}
 		rec.add(4)
 		rec.stop()
-		err := c.IsFinish()
-		if err != nil {
+		if err := c.Wait(); err != nil {
 			t.Errorf("expected no errors, got %v", err)
 		}
 		if !rec.match([]int{4}) {

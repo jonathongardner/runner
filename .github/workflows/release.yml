@@ -21,7 +21,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Run test
-        run: go test
+        run: go test ./... -timeout 30s
       - name: Build release file
         run: git log $(git show HEAD~1:version.txt)..HEAD --pretty=format:"- %s (%h)" | grep -E '^- (chore|fix|feat|docs):' > release.md || (echo "no changes" && exit 1)
       # - name: Update Change Log
