@@ -1,9 +1,5 @@
 package runner
 
-import "fmt"
-
-var ErrDoneClosed = fmt.Errorf("done channel closed")
-
 type OrderRestorer struct {
 	done chan struct{}
 	prev chan struct{}
@@ -45,7 +41,7 @@ func (o *OrderRestorer) Wait() error {
 	// Wait for the previous channel to be closed
 	select {
 	case <-o.done:
-		return ErrDoneClosed
+		return ErrShuttingDown
 	case <-o.prev:
 		return nil
 	}

@@ -10,6 +10,7 @@ import (
 
 var ErrErrors = fmt.Errorf("error running the jobs")
 var ErrInvalidLimit = fmt.Errorf("limit must be greater than 0")
+var ErrShuttingDown = fmt.Errorf("shutting down")
 
 // The default limit for the limit controller
 var defaultLimit = 4
@@ -64,6 +65,7 @@ func NewControllerWithLimit(limit int) (*Controller, error) {
 		finishChan:     make(chan struct{}),
 		errorChan:      make(chan error),
 		errors:         make([]string, 0),
+		closeOnError:   false,
 		or:             NewOrderRestorer(dc),
 	}
 
@@ -105,19 +107,28 @@ func (c *Controller) Shutdown() {
 	}
 }
 
+// ShuttingDownChan will return a channel that will be closed when the controller is shutting down
+func (c *Controller) ShuttingDownChan() <-chan struct{} {
+	return c.doneChan
+}
+
 // IsShuttingDown will return true if the controller is shutting down
 func (c *Controller) IsShuttingDown() bool {
 	select {
-	case <-c.doneChan:
+	case <-c.ShuttingDownChan():
 		return true
 	default:
 		return false
 	}
 }
 
-// ShuttingDownChan will return a channel that will be closed when the controller is shutting down
-func (c *Controller) ShuttingDownChan() <-chan struct{} {
-	return c.doneChan
+// IsShuttingDown will return true if the controller is shutting down
+func (c *Controller) ShuttingDownErr() error {
+	if c.IsShuttingDown() {
+		return ErrShuttingDown
+	}
+	return nil
+
 }
 
 // Finish used to exit (should call Shutdown to gracefully close everything)

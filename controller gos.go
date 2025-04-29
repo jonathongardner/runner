@@ -90,7 +90,7 @@ func (c *Controller) Background(bgRunner Runner) {
 }
 
 func (c *Controller) addError(err error) {
-	if err == nil || err == ErrDoneClosed {
+	if err == nil || err == ErrShuttingDown {
 		return
 	}
 	select {
