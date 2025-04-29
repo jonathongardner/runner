@@ -29,16 +29,48 @@ func (f foreverRunnner) Run(rc *Controller) error {
 	return nil
 }
 
-type errorRunnner struct{}
-
-func (f errorRunnner) Run(rc *Controller) error {
-	return fmt.Errorf("foo chew foo")
+type runner struct {
+	// used to wait for the controller to finish
+	value    int
+	prevWait chan bool
+	wait     chan bool
+	err      error
 }
 
-type finishRunnner struct{}
+func newRunner(err error) *runner {
+	prevWait := make(chan bool)
+	close(prevWait)
+	return &runner{
+		value:    0,
+		wait:     make(chan bool),
+		prevWait: prevWait,
+		err:      err,
+	}
+}
 
-func (f finishRunnner) Run(rc *Controller) error {
-	return nil
+func (cw runner) newRunner(err error) *runner {
+	return &runner{
+		err:      err,
+		value:    0,
+		prevWait: cw.wait,
+		wait:     make(chan bool),
+	}
+}
+
+func (w *runner) Run(rc *Controller) error {
+	select {
+	case <-w.prevWait:
+		select {
+		case <-rc.ShuttingDownChan():
+			w.value = 2
+		default:
+			w.value = 1
+		}
+	case <-rc.ShuttingDownChan():
+		w.value = 2
+	}
+	close(w.wait)
+	return w.err
 }
 
 // --------------Reciever Sender Runners-----------------
@@ -118,11 +150,11 @@ func TestController(t *testing.T) {
 	// SetLogger(fmtLogger{})
 
 	t.Run("Closes if nothing to wait on", func(t *testing.T) {
-		c := NewController()
+		c, _ := NewController()
 		if c.isFinished() {
 			t.Errorf("expected finishChan to be open after creating")
 		}
-		c.GoBackground(foreverRunnner{})
+		c.Background(foreverRunnner{})
 
 		if err := c.Wait(); err != nil {
 			t.Errorf("expected no error, got %v", err)
@@ -132,21 +164,69 @@ func TestController(t *testing.T) {
 			t.Errorf("expected finishChan to be closed after creating")
 		}
 	})
-	t.Run("Returns error if error returned", func(t *testing.T) {
-		c := NewController()
+	t.Run("Returns error if error returned but doesnt close", func(t *testing.T) {
+		c, _ := NewController()
 		if c.isFinished() {
 			t.Errorf("expected finishChan to be open after creating")
 		}
-		c.Go(errorRunnner{})
-		c.Go(errorRunnner{})
+		w1 := newRunner(fmt.Errorf("foo"))
+		c.Go(w1)
+		w2 := w1.newRunner(fmt.Errorf("chew"))
+		c.Go(w2)
+		w3 := w2.newRunner(fmt.Errorf("bar"))
+		c.Go(w3)
 
 		if err := c.Wait(); err != ErrErrors {
 			t.Errorf("expected no errors, got %v", err)
 		}
 
 		errStr := c.Errors()
-		if errStr != "foo chew foo, foo chew foo" {
-			t.Errorf("expected errors to be 'foo chew foo, foo chew foo', got %v", errStr)
+		if errStr != "foo, chew, bar" {
+			t.Errorf("expected errors to be 'foo, chew, bar', got %v", errStr)
+		}
+
+		if w2.value != 1 {
+			t.Errorf("expected w3 to be 1, got %v", w3.value)
+		}
+
+		if w3.value != 1 {
+			t.Errorf("expected w3 to be 1, got %v", w3.value)
+		}
+
+		if !c.isFinished() {
+			t.Errorf("expected finishChan to be open after creating")
+		}
+	})
+	t.Run("Returns error if error returned and close", func(t *testing.T) {
+		c, _ := NewController()
+		if c.isFinished() {
+			t.Errorf("expected finishChan to be open after creating")
+		}
+		// change to close on go errors
+		c.CloseOnGoErrors()
+
+		w1 := newRunner(fmt.Errorf("foo"))
+		c.Go(w1)
+		w2 := w1.newRunner(fmt.Errorf("chew"))
+		c.Go(w2)
+		w3 := w2.newRunner(fmt.Errorf("bar"))
+		c.Go(w3)
+
+		if err := c.Wait(); err != ErrErrors {
+			t.Errorf("expected no errors, got %v", err)
+		}
+
+		errStr := c.Errors()
+		if errStr != "foo" {
+			t.Errorf("expected errors to be 'foo', got %v", errStr)
+		}
+
+		if w2.value != 2 {
+			t.Errorf("expected w3 to be 1, got %v", w3.value)
+		}
+
+		if w3.value != 2 {
+			t.Errorf("expected w3 to be 1, got %v", w3.value)
 		}
 
 		if !c.isFinished() {
@@ -154,12 +234,12 @@ func TestController(t *testing.T) {
 		}
 	})
 	t.Run("Returns error if background error returned", func(t *testing.T) {
-		c := NewController()
+		c, _ := NewController()
 		if c.isFinished() {
 			t.Errorf("expected finishChan to be open after creating")
 		}
-		c.GoBackground(errorRunnner{})
-		c.Go(finishRunnner{})
+		c.Background(newRunner(fmt.Errorf("foo chew foo")))
+		c.Go(newRunner(nil))
 		if err := c.Wait(); err != ErrErrors {
 			t.Errorf("expected ErrErrors, got %v", err)
 		}
@@ -173,8 +253,17 @@ func TestController(t *testing.T) {
 			t.Errorf("expected finishChan to be open after creating")
 		}
 	})
+	t.Run("returns error if bad limit", func(t *testing.T) {
+		_, err := NewControllerWithLimit(0)
+		if err != ErrInvalidLimit {
+			t.Errorf("expected invalid limit error, got %v", err)
+		}
+	})
 	t.Run("Go is not limited", func(t *testing.T) {
-		c := NewControllerWithLimit(1)
+		c, err := NewControllerWithLimit(1)
+		if err != nil {
+			t.Errorf("expected no error, got %v", err)
+		}
 		if c.isFinished() {
 			t.Errorf("expected finishChan to be open after creating")
 		}
@@ -203,7 +292,7 @@ func TestController(t *testing.T) {
 		}
 	})
 	t.Run("LimitedGo and Go", func(t *testing.T) {
-		c := NewControllerWithLimit(1)
+		c, _ := NewControllerWithLimit(1)
 		if c.isFinished() {
 			t.Errorf("expected finishChan to be open after creating")
 		}
@@ -231,7 +320,7 @@ func TestController(t *testing.T) {
 		}
 	})
 	t.Run("LimitedGo is... limited", func(t *testing.T) {
-		c := NewControllerWithLimit(1)
+		c, _ := NewControllerWithLimit(1)
 		if c.isFinished() {
 			t.Errorf("expected finishChan to be open after creating")
 		}

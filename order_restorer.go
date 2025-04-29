@@ -2,7 +2,7 @@ package runner
 
 import "fmt"
 
-var ErrControllerFinished = fmt.Errorf("already finished")
+var ErrDoneClosed = fmt.Errorf("done channel closed")
 
 type OrderRestorer struct {
 	done chan struct{}
@@ -44,9 +44,9 @@ func (o *OrderRestorer) Finished() error {
 func (o *OrderRestorer) Wait() error {
 	// Wait for the previous channel to be closed
 	select {
+	case <-o.done:
+		return ErrDoneClosed
 	case <-o.prev:
 		return nil
-	case <-o.done:
-		return ErrControllerFinished
 	}
 }

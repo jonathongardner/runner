@@ -98,7 +98,7 @@ func TestAlreadyFinishedOrderRestorer(t *testing.T) {
 	// or maybe it picks the first, idk, either way
 	// t2 guarantees that we check the done channel
 
-	if err := t2.Wait(); err != ErrControllerFinished {
-		t.Errorf("Expected %v but got %v", ErrControllerFinished, err)
+	if err := t2.Wait(); err != ErrDoneClosed {
+		t.Errorf("Expected %v but got %v", ErrDoneClosed, err)
 	}
 }

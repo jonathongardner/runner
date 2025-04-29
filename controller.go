@@ -9,6 +9,7 @@ import (
 )
 
 var ErrErrors = fmt.Errorf("error running the jobs")
+var ErrInvalidLimit = fmt.Errorf("limit must be greater than 0")
 
 // The default limit for the limit controller
 var defaultLimit = 4
@@ -39,18 +40,19 @@ type Controller struct {
 	errorChan chan error
 	errors    []string
 	//-----Order Restorer------
-	or *OrderRestorer
+	or           *OrderRestorer
+	closeOnError bool
 }
 
 // NewController returns a new controller with default values
-func NewController() *Controller {
+func NewController() (*Controller, error) {
 	return NewControllerWithLimit(defaultLimit)
 }
 
 // NewControllerWithLimit returns a new controller with with a variable limit size
-func NewControllerWithLimit(limit int) *Controller {
+func NewControllerWithLimit(limit int) (*Controller, error) {
 	if limit < 1 {
-		panic("limit must be greater than 0")
+		return nil, ErrInvalidLimit
 	}
 	dc := make(chan struct{})
 	c := &Controller{
@@ -69,7 +71,11 @@ func NewControllerWithLimit(limit int) *Controller {
 	go c.runMain()
 	go c.runErr()
 
-	return c
+	return c, nil
+}
+
+func (c *Controller) CloseOnGoErrors() {
+	c.closeOnError = true
 }
 
 //----------------Handle close-----------------
