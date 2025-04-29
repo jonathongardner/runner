@@ -1,11 +1,34 @@
 package runner
 
-func (c *Controller) checkDone(function func()) {
+func (c *Controller) addCount(v chan bool, function func(callback func())) {
 	select {
 	case <-c.doneChan:
-		log.Debug("Not running job because shuting down")
-	default:
+		log.Debug("Not adding count b/c shuting down")
+	case v <- true:
+		function(func() {
+			v <- false
+		})
+	}
+}
+
+// waitForLimiter waits until c.limit chan has room. If shutdown before, it will
+// skip running the function and return true (false means it ran the function)
+func (c *Controller) waitForLimiter(function func()) bool {
+	select {
+	case <-c.doneChan:
+		log.Debug("Not running limited job because shuting down")
+		return true
+	case c.limiter <- true:
+		log.Debug("Got limiter")
 		function()
+		return false
+	}
+}
+func (c *Controller) releaseLimiter() {
+	select {
+	case <-c.limiter:
+	default:
+		log.Errorf("no more limiter available")
 	}
 }
 
@@ -14,12 +37,19 @@ func (c *Controller) checkDone(function func()) {
 // and can be retrieved with `Errors()` It will continue
 // to run unlses CloseOnGoError is set to true
 func (c *Controller) Go(runner Runner) {
-	c.checkDone(func() {
-		c.mainCountChan <- true
+	c.addCount(c.mainCountChan, func(finished func()) {
 		go func() {
+			defer finished()
 			c.addError(runner.Run(c))
-			c.mainCountChan <- false
 		}()
+	})
+}
+
+// BGo Same as `Go` but run in the current thread
+func (c *Controller) BGo(runner Runner) {
+	c.addCount(c.mainCountChan, func(finished func()) {
+		defer finished()
+		c.addError(runner.Run(c))
 	})
 }
 
@@ -28,23 +58,13 @@ func (c *Controller) Go(runner Runner) {
 // and can be retrieved with `Errors()`. It will continue
 // to run unlses CloseOnGoError is set to true
 func (c *Controller) LimitedGo(runner Runner) {
-	c.checkDone(func() {
-		// Add count so we know to wait to close stuff
-		c.limitCountChan <- true
+	c.addCount(c.limitCountChan, func(finished func()) {
 		go func() {
-			select {
-			case <-c.doneChan:
-				log.Debug("Not running limited job because shuting down")
-			case c.limiter <- true:
-				log.Info("Got it")
+			defer finished()
+			c.waitForLimiter(func() {
 				c.addError(runner.Run(c))
-				select {
-				case <-c.limiter:
-				default:
-					log.Errorf("no more limiter available")
-				}
-				c.limitCountChan <- false
-			}
+				c.releaseLimiter()
+			})
 		}()
 	})
 }
@@ -52,23 +72,17 @@ func (c *Controller) LimitedGo(runner Runner) {
 // BlLimitedGo is the same as LimitedGo but it will block adding
 // to the limiter until one is free
 func (c *Controller) BlLimitedGo(runner Runner) {
-	c.checkDone(func() {
-		// Add count so we know to wait to close stuff
-		c.limitCountChan <- true
-		select {
-		case <-c.doneChan:
-			log.Debug("Not running limited job because shuting down")
-		case c.limiter <- true:
+	// need to add count first so main knows to wait for this to finish
+	c.addCount(c.limitCountChan, func(finished func()) {
+		skipped := c.waitForLimiter(func() { // block this thread until free
 			go func() {
-				log.Info("Got it")
+				defer finished()
 				c.addError(runner.Run(c))
-				select {
-				case <-c.limiter:
-				default:
-					log.Errorf("no more limiter available")
-				}
-				c.limitCountChan <- false
+				c.releaseLimiter()
 			}()
+		})
+		if skipped {
+			finished()
 		}
 	})
 }
@@ -76,15 +90,14 @@ func (c *Controller) BlLimitedGo(runner Runner) {
 // Background start new go routine that will get stopped when all `Go` created ones finish
 // if the bgRunner returns error it will gracefully shutdown everything else
 func (c *Controller) Background(bgRunner Runner) {
-	c.checkDone(func() {
-		c.backCountChan <- true
+	c.addCount(c.backCountChan, func(finished func()) {
 		go func() {
+			defer finished()
 			err := bgRunner.Run(c)
 			if err != nil {
 				c.errorChan <- err
 				c.Shutdown()
 			}
-			c.backCountChan <- false
 		}()
 	})
 }
@@ -94,12 +107,9 @@ func (c *Controller) addError(err error) {
 		return
 	}
 	select {
-	case <-c.doneChan:
+	case c.errorChan <- err:
 		return
 	default:
-		c.errorChan <- err
-	}
-	if c.closeOnError {
-		c.Shutdown()
+		return
 	}
 }

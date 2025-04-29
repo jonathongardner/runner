@@ -128,17 +128,18 @@ func (rr *recieverRunnner) match(b []int) bool {
 	return slices.Equal(rr.received, b)
 }
 
-type senderRunnner struct {
-	value int
-	rec   *recieverRunnner
-}
-
-func newSenderRunnner(value int, rec *recieverRunnner) *senderRunnner {
+func (rec *recieverRunnner) newSenderRunnner(value int) *senderRunnner {
 	return &senderRunnner{
 		value: value,
 		rec:   rec,
 	}
 }
+
+type senderRunnner struct {
+	value int
+	rec   *recieverRunnner
+}
+
 func (sr *senderRunnner) Run(rc *Controller) error {
 	sr.rec.add(sr.value)
 	return nil
@@ -197,42 +198,6 @@ func TestController(t *testing.T) {
 			t.Errorf("expected finishChan to be open after creating")
 		}
 	})
-	t.Run("Returns error if error returned and close", func(t *testing.T) {
-		c, _ := NewController()
-		if c.isFinished() {
-			t.Errorf("expected finishChan to be open after creating")
-		}
-		// change to close on go errors
-		c.CloseOnGoErrors()
-
-		w1 := newRunner(fmt.Errorf("foo"))
-		c.Go(w1)
-		w2 := w1.newRunner(fmt.Errorf("chew"))
-		c.Go(w2)
-		w3 := w2.newRunner(fmt.Errorf("bar"))
-		c.Go(w3)
-
-		if err := c.Wait(); err != ErrErrors {
-			t.Errorf("expected no errors, got %v", err)
-		}
-
-		errStr := c.Errors()
-		if errStr != "foo" {
-			t.Errorf("expected errors to be 'foo', got %v", errStr)
-		}
-
-		if w2.value != 2 {
-			t.Errorf("expected w3 to be 1, got %v", w3.value)
-		}
-
-		if w3.value != 2 {
-			t.Errorf("expected w3 to be 1, got %v", w3.value)
-		}
-
-		if !c.isFinished() {
-			t.Errorf("expected finishChan to be open after creating")
-		}
-	})
 	t.Run("Returns error if background error returned", func(t *testing.T) {
 		c, _ := NewController()
 		if c.isFinished() {
@@ -271,9 +236,9 @@ func TestController(t *testing.T) {
 		c.Go(rec)
 
 		senders := []*senderRunnner{
-			newSenderRunnner(1, rec),
-			newSenderRunnner(2, rec),
-			newSenderRunnner(3, rec),
+			rec.newSenderRunnner(1),
+			rec.newSenderRunnner(2),
+			rec.newSenderRunnner(3),
 		}
 
 		// Need to wait for rec to start b/c the go routines arent in order
@@ -300,9 +265,9 @@ func TestController(t *testing.T) {
 		c.LimitedGo(rec)
 
 		senders := []*senderRunnner{
-			newSenderRunnner(1, rec),
-			newSenderRunnner(2, rec),
-			newSenderRunnner(3, rec),
+			rec.newSenderRunnner(1),
+			rec.newSenderRunnner(2),
+			rec.newSenderRunnner(3),
 		}
 
 		// Need to wait for rec to start b/c the go routines arent in order
@@ -328,9 +293,9 @@ func TestController(t *testing.T) {
 		c.LimitedGo(rec)
 
 		senders := []*senderRunnner{
-			newSenderRunnner(1, rec),
-			newSenderRunnner(2, rec),
-			newSenderRunnner(3, rec),
+			rec.newSenderRunnner(1),
+			rec.newSenderRunnner(2),
+			rec.newSenderRunnner(3),
 		}
 
 		// Need to wait for rec to start b/c the go routines arent in order

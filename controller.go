@@ -41,8 +41,7 @@ type Controller struct {
 	errorChan chan error
 	errors    []string
 	//-----Order Restorer------
-	or           *OrderRestorer
-	closeOnError bool
+	or *OrderRestorer
 }
 
 // NewController returns a new controller with default values
@@ -65,7 +64,6 @@ func NewControllerWithLimit(limit int) (*Controller, error) {
 		finishChan:     make(chan struct{}),
 		errorChan:      make(chan error),
 		errors:         make([]string, 0),
-		closeOnError:   false,
 		or:             NewOrderRestorer(dc),
 	}
 
@@ -74,10 +72,6 @@ func NewControllerWithLimit(limit int) (*Controller, error) {
 	go c.runErr()
 
 	return c, nil
-}
-
-func (c *Controller) CloseOnGoErrors() {
-	c.closeOnError = true
 }
 
 //----------------Handle close-----------------
